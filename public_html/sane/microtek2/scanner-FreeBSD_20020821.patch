@@ -1,0 +1,26 @@
+*** usbdevs.orig	Tue Apr 30 00:05:24 2002
+--- usbdevs	Tue Aug 20 23:54:38 2002
+***************
+*** 806,811 ****
+--- 806,813 ----
+  product MICROTEK V6USL		0x00a3	ScanMaker V6USL
+  product MICROTEK V6USL2		0x80a3	ScanMaker V6USL
+  product MICROTEK V6UL		0x80ac	ScanMaker V6UL
++ product	MICROTEK X12USL		0x20b0	ScanMaker X12USL
++ product	MICROTEK NEC_MR1200U	0x20c6	NEC MultiReader 1200U
+  
+  /* Midiman products */
+  product MIDIMAN MIDISPORT2X2	0x1001	Midisport 2x2
+*** usbdevs.h.orig	Tue Apr 30 00:05:24 2002
+--- usbdevs.h	Tue Aug 20 23:54:38 2002
+***************
+*** 813,818 ****
+--- 813,820 ----
+  #define	USB_PRODUCT_MICROTEK_V6USL	0x00a3		/* ScanMaker V6USL */
+  #define	USB_PRODUCT_MICROTEK_V6USL2	0x80a3		/* ScanMaker V6USL */
+  #define	USB_PRODUCT_MICROTEK_V6UL	0x80ac		/* ScanMaker V6UL */
++ #define	USB_PRODUCT_MICROTEK_X12USL	0x20b0		/* ScanMaker X12USL */
++ #define	USB_PRODUCT_MICROTEK_NEC_MR1200U	0x20c6		/* NEC MultiReader 1200U */
+  
+  /* Midiman products */
+  #define	USB_PRODUCT_MIDIMAN_MIDISPORT2X2	0x1001		/* Midisport 2x2 */

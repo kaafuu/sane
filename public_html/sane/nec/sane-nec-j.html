@@ -1,0 +1,114 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.0 Transitional//EN"> 
+<HTML>
+<HEAD>
+<META http-equiv="Content-Type" content="text/html; charset=iso-2022-jp">
+<TITLE> Sane backend for NEC-scanners 
+</TITLE>
+</HEAD>
+<BODY>
+
+<H1>
+<IMG SRC="sane.png" ALT="Sane"> backend for NEC-scanners
+</H1>
+このバックエンドは、NEC製スキャナのPC-IN500/4Cに対応しています。このバックエンドについて下記の点を覚えておいてください。作者は、使用するすべての環境下において問題なく動作するとは考えていません。また、NEC製のPC-IN500/4Cでしか動作確認ができていません（他のNEC製スキャナは動作しません）。
+This backend supports the NEC scanners PC-IN500/4C. Please remember the early state of this backend; the authors do not expect it to work without problems under every condition. Especially must be pointed out that I am only able to test the backend with PC-IN500/4C, thus the current version of the backend might not work "outof the box" with another scanners.
+<BR><BR> MultiReader 1200Uは、<A href="../microtek2/microtek2-patch.html">こちら</A>のパッチを、Microtek2のバックエンドにあてて使ってください。
+MultiReader 1200U is supported by <A href="../microtek2/microtek2-patch.html">this</A> patch for Microtek2 backend.
+
+<P>コメント、バグレポートおよびバグ修正があれば、下記まで連絡をください。
+<BR><A href="mailto:kaafuu@mug.biglobe.ne.jp"> Kazuya Fukuda</A>, または
+<BR><a href="http://www.sane-project.org/mailing-lists.html">SANE - Mailing Lists and IRC Channel</a>
+
+<!-- ####################################################### -->
+<H3>ソースのダウンロード:</H3>
+<UL>
+<LI>
+version 0.12</A>
+</LI>
+<LI>
+<A href="sane-nec-0.11.tar.gz">version 0.11</A>
+</LI>
+<LI>
+<A href="nec-0.10.tar.gz">version 0.10</A>
+</LI>
+</UL>
+<P>Saneに関する情報は, こちらをご覧ください。
+<a href="http://www.sane-project.org/">http://www.sane-project.org/</A>
+<HR>
+
+<!-- ####################################################### -->
+<H2>バージョン0.12とバージョン0.11の変更点:</H2>
+<UL>
+<LI> Removed references to sharp backend (grep for "JX"). 
+</LI>
+<LI> Check for HAVE_SYS_SHM_H before including sys/shm.h and disable shared
+memory support if necessary. 
+</LI>
+<LI> Free devlist allocated in sane_get_devices() in sane_exit() resolution setting bug fixed (PC-IN500/4C 10dpi step). 
+</LI>
+<LI> Removed resolution list.
+</LI>
+</UL>
+
+<H2>バージョン0.11とバージョン0.10の変更点:</H2>
+<UL>
+<LI> get_data_buffer_statusを使わないようにした。
+</LI>
+<LI> tar ballをsane-1.0.3のパッチに対応。
+</LI>
+</UL>
+
+<H2>バージョン0.10:</H2>
+<UL>
+<LI> sharp-backendを元にした最初のリリース
+</LI>
+<LI> 対応しているスキャナはPC-IN500/4Cだけです。
+<BR> MultiReader 300S/300S/600S/600U/650U/660U/1201U/1260Uには対応していません。
+<BR> MultiReader PetiScanは対応していません。
+<BR> MultiReader 1200Uは、<A href="../microtek2/microtek2-patch.html">こちら</A>のパッチを、Microtek2のバックエンドにあてて使ってください。
+</LI>
+</UL>
+<HR>
+
+<!-- ####################################################### -->
+<H2>制限事項およびわかっているバグ:</H2>
+<UL>
+<LI> カラー(8bits)および、グレイ(8bits)、Lineart(1bit)のみ対応
+</LI>
+<LI> ディザには未対応
+</LI>
+</UL>
+<HR>
+
+<!-- ####################################################### -->
+<H2>今後の予定:</H2>
+<UL>
+<LI> MultiReader 300S/300S/600S/600U/650U/660U/1201U/1260Uの対応。
+<LI> MultiReader PetiScanの対応。
+<LI><A href="../microtek2/microtek2-patch.html">MultiReader 1200U</A>をMicrotek2のバックエンドに取り込む。
+</LI>
+</UL>
+
+<HR>
+
+<!-- ####################################################### -->
+<H3>SEE ALSO</H3>
+sane-scsi(5)
+
+<!-- ####################################################### -->
+<H2>Acknowledgments</H2>
+This backend is based on backend for Sharp scanners.
+
+<BR>
+Parts of this page are a plain copy of sane-sharp.html by Abel Deuring.
+
+<BR><BR><HR noshade>
+
+<ADDRESS>
+<A href="mailto:kaafuu@mug.biglobe.ne.jp">kaafuu@mug.biglobe.ne.jp</A><BR>
+Copyright (C) 1999-2005 kaafuu(Kazuya Fukuda) All rights reserved.<BR>
+$Date: 2005/06/22 01:14:04 $
+</ADDRESS>
+
+</BODY>
+</HTML>

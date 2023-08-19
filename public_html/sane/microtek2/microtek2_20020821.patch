@@ -1,0 +1,1263 @@
+Index: sane/sane-backends/backend/Makefile.in
+===================================================================
+RCS file: /cvsroot/external/sane/sane-backends/backend/Makefile.in,v
+retrieving revision 1.56
+diff -r1.56 Makefile.in
+307a308
+> libsane-microtek2.la: ../sanei/sanei_usb.lo
+Index: sane/sane-backends/backend/microtek2.c
+===================================================================
+RCS file: /cvsroot/external/sane/sane-backends/backend/microtek2.c,v
+retrieving revision 1.10
+diff -r1.10 microtek2.c
+84a85
+> #include "../include/sane/sanei_usb.h"
+98a100,112
+> 
+> /* USB_X12USL: only for ScanMaker X12USL(USB) & NEC MultiReader 1200U.
+>    These scanner use ioctl interface. These has three Endpoints,
+>    but it is defferent from X6USB.
+>    MultiReader 1200U is OEM product by Microtelk and this has only USB
+>    interface.
+> 
+>    device file(/dev/usbscanner) is need in microtek2.conf. 
+> */
+> #define USB_X12USL
+> #define SUPPORT_NEC
+> #define SUPPORT_SANEI
+> 
+110a125,127
+> #ifdef USB_X12USL
+>                                { 1.0, "off", "off", "off", "off", "off", "off", 1};
+> #else
+111a129
+> #endif /* USB_X12USL */
+118a137,488
+> #ifdef USB_X12USL
+> #include <sys/ioctl.h>
+> #ifdef __FreeBSD__
+>  #include <dev/usb/usb.h>
+> #elif __linux__
+>  #include <linux/types.h>
+>  #define USB_DO_REQUEST 71
+> 
+> typedef struct usb_device_request {
+>   __u8 bmRequestType;
+>   __u8 bRequest;
+>   __u8 wValue[2];
+>   __u8 wIndex[2];
+>   __u8 wLength[2];
+> } usb_device_request;
+> 
+> typedef struct usb_ctl_request {
+>   struct usb_device_request request;
+>   void *data;
+>   int addr;			/* compatibility for BSD */
+>   int flags;			/* compatibility for BSD */
+>   int actlen;			/* compatibility for BSD */
+> } usb_ctl_request;
+> #endif /* __linux__ */
+> 
+> static SANE_Status
+> usb_write_ioctl(int sfd, u_char cdb[], void *buf, size_t *length);
+> static SANE_Status
+> usb_read_ioctl(int sfd, u_char cdb[], void *buf, size_t *length);
+> 
+> /* X12USL(USB) & MR1200U */
+> /* send gamma via USB */
+> static SANE_Status
+> send_gamma(Microtek2_Scanner *ms, u_char scsi_cdb[])
+> {
+>     u_int8_t cmd[RI_CMD_L];
+>     SANE_Status status;
+>     size_t size;
+>     u_int8_t ret;
+>     
+>     /* c0 27 00 01 00 80 01 00 (R gamma data)*/
+>     /* c0 27 00 21 00 80 01 00 (G gamma data)*/
+>     /* c0 27 00 41 00 80 01 00 (B gamma data)*/
+>     size = 1;
+>     cmd[0] = 0x27;
+>     cmd[1] = 0x0;
+>     /* X12USL & MR1200U need cmd[2] = 0
+>        cmd[2] = scsi_cdb[2]; */
+>     cmd[2] = 0;
+>     cmd[3] = 0x0;
+>     cmd[4] = 0x0;
+>     cmd[5] = scsi_cdb[5];
+>     cmd[6] = scsi_cdb[8];
+>     cmd[7] = scsi_cdb[7];
+>     cmd[8] = 0x1;
+>     cmd[9] = 0x0;
+>     DBG(30, "send_gamma: %x, %x, %x, %x, %x, %x, %x, %x, %x, %x\n",
+>              cmd[0], cmd[1], cmd[2], cmd[3], cmd[4], cmd[5], cmd[6], cmd[7], cmd[8], cmd[9]);
+>     status = usb_read_ioctl(ms->sfd, (u_char *)&cmd, &ret, &size);
+> 
+>     if ( ret == 0 )
+>       status = SANE_STATUS_GOOD;
+>     else
+>       status = SANE_STATUS_DEVICE_BUSY;
+> 
+>     if ( status != SANE_STATUS_GOOD )
+>         DBG(1, "send_gamma: '%s'\n", sane_strstatus(status));
+> 
+>     return status;
+> }
+> 
+> /* X12USL(USB) & MR1200U */
+> /* send shading via USB */
+> static SANE_Status
+> send_shading(Microtek2_Scanner *ms, u_char scsi_cdb[])
+> {
+>     u_int8_t cmd[RI_CMD_L];
+>     SANE_Status status;
+>     size_t size;
+>     u_int8_t ret;
+>     
+>     size = 1;
+>     cmd[0] = 0x29;
+>     cmd[1] = 0x0;
+>     cmd[2] = scsi_cdb[2];
+>     cmd[3] = 0x0;
+>     cmd[4] = 0x0;
+>     cmd[5] = scsi_cdb[5];
+>     cmd[6] = scsi_cdb[8];
+>     cmd[7] = scsi_cdb[7];
+>     cmd[8] = 0x1;
+>     cmd[9] = 0x0;
+>     DBG(30, "send_shading: %x, %x, %x, %x, %x, %x, %x, %x, %x, %x\n",
+>              cmd[0], cmd[1], cmd[2], cmd[3], cmd[4], cmd[5], cmd[6], cmd[7], cmd[8], cmd[9]);
+>     status = usb_read_ioctl(ms->sfd, (u_char *)&cmd, &ret, &size);
+> 
+>     if ( ret == 0 )
+>       status = SANE_STATUS_GOOD;
+>     else
+>       status = SANE_STATUS_DEVICE_BUSY;
+> 
+>     if ( status != SANE_STATUS_GOOD )
+>         DBG(1, "send_gamma: '%s'\n", sane_strstatus(status));
+> 
+>     return status;
+> }
+> 
+> /* X12USL(USB) & MR1200U */
+> /* send xxx via USB */
+> static SANE_Status
+> read_sysinfo(Microtek2_Scanner *ms, size_t *dsize)
+> {
+>     u_int8_t cmd[RI_CMD_L];
+>     SANE_Status status;
+>     size_t size;
+>     u_int8_t ret;
+>     
+>     size = 1;
+>     cmd[0] = 0x26;
+>     cmd[1] = 0x0;
+>     cmd[2] = 0x0;
+>     cmd[3] = 0x0;
+>     cmd[4] = 0x0;
+>     cmd[5] = 0x0;
+>     cmd[6] = *dsize & 0xff;
+>     cmd[7] = (*dsize >> 8) & 0xff;
+>     cmd[8] = 0x1;
+>     cmd[9] = 0x0;
+>     DBG(30, "read_sysinfo: %x, %x, %x, %x, %x, %x, %x, %x, %x, %x\n",
+>              cmd[0], cmd[1], cmd[2], cmd[3], cmd[4], cmd[5], cmd[6], cmd[7], cmd[8], cmd[9]);
+>     status = usb_read_ioctl(ms->sfd, (u_char *)&cmd, &ret, &size);
+> 
+>     if ( ret == 0 )
+>       status = SANE_STATUS_GOOD;
+>     else
+>       status = SANE_STATUS_DEVICE_BUSY;
+> 
+>     if ( status != SANE_STATUS_GOOD )
+>         DBG(1, "read_sysinfo: '%s'\n", sane_strstatus(status));
+> 
+>     return status;
+> }
+> 
+> #if 0
+> /*
+>  * this command is needed for X12USL(USB) & MR1200U(?????)
+>  *
+>  */
+> static SANE_Status
+> change_definition(Microtek2_Scanner *ms)
+> {
+>     static u_char cmd[10] = {0x40, 0, 0, 0, 0, 0, 0, 0, 1, 0};
+>     SANE_Status status;
+>     char buf[1];
+>     size_t buf_size;
+> 
+>     DBG (11, "<< change_definition ");
+> 
+>     buf_size = 1;
+> 
+>     status = usb_read_ioctl(ms->sfd, (u_char *)&cmd, &buf, &buf_size);
+> 
+>     DBG (30, "%d >>\n", buf[0]);
+>     return (status);
+> }
+> #endif
+> 
+> /*
+>  * usb_read_ioctl
+>  *
+>  *
+>  */
+> static SANE_Status
+> usb_read_ioctl(int sfd, u_char cdb[], void *buf, size_t *length)
+> {
+>     SANE_Status status;
+> 
+> #ifdef SUPPORT_SANEI
+>     int	rtype, req, value, index;
+> 
+>     DBG (11, "<< usb_read_ioctl(SANEI_USB) ");
+> 
+>     rtype = 0xc0;
+>     req = cdb[0];
+>     value = cdb[2];
+>     value |= cdb[5] << 8;
+>     switch (req)
+>       {
+> 	/* 6-byte command */
+>       case 0x0:				/* test unit ready */
+>       case 0x3:				/* request sense */
+>       case 0x12:			/* inquiry */
+>       default:
+> 	index = 0;
+> 	break;
+> 	/* 10-byte command */
+>       case 0x26:			/* read sysinfo */
+>       case 0x27:			/* send gamma */
+>       case 0x28:			/* read image info */
+>       case 0x29:			/* send shading */
+> 	index = cdb[6];
+> 	index |= cdb[7] << 8;
+> 	break;
+>       case 0x24:			/* set window */
+>       case 0x2a:			/* send system status */
+> 	rtype = 0x40;
+> 	index = 0;
+> 	break;
+>       }
+> 
+>     DBG(20, "\n[Setup Packet] %02x %02x %02x %02x %02x %02x %02x %02x\n",
+> 	rtype,
+> 	req,
+> 	value & 0xff, (value >> 8) & 0xff,
+> 	index & 0xff, (index >> 8) & 0xff,
+> 	*length & 0xff,  (*length >> 8) & 0xff
+> 	);
+> 
+>     status = sanei_usb_control_msg(sfd, rtype, req, value, index, *length, buf);
+> #else
+>     struct usb_ctl_request creq;
+> 
+>     DBG (11, "<< usb_read_ioctl ");
+> 
+>     creq.ucr_addr = 0;
+>     creq.ucr_request.bmRequestType = 0xc0;
+>     creq.ucr_request.bRequest = cdb[0];
+>     creq.ucr_request.wValue[0] = cdb[2];
+>     creq.ucr_request.wValue[1] = 0;
+>     switch (cdb[0])
+>       {
+>       case 0x0:
+>       case 0x3:
+>       case 0x12:
+> 	creq.ucr_request.wIndex[0] = 0;
+> 	creq.ucr_request.wIndex[1] = 0;
+> 	break;
+>       case 0x27:			/* send gamma */
+> 	creq.ucr_request.wValue[0] = 0;
+>       case 0x29:			/* send shading */
+> 	creq.ucr_request.wValue[1] = cdb[5];
+> 	creq.ucr_request.wIndex[0] = cdb[6];
+> 	creq.ucr_request.wIndex[1] = cdb[7];
+> 	break;
+>       case 0x24:
+>       case 0x26:			/* read sysinfo */
+>       case 0x28:			/* read image info */
+>       case 0x2a:
+>       default:
+> 	creq.ucr_request.wIndex[0] = cdb[6];
+> 	creq.ucr_request.wIndex[1] = cdb[7];
+> 	break;
+>       }
+>     creq.ucr_request.wLength[0] = *length & 0xff;
+>     creq.ucr_request.wLength[1] = (*length >> 8) & 0xff;
+> 
+>     creq.ucr_data = buf;
+>     creq.ucr_flags = 0;
+>     creq.ucr_actlen = 0;
+> 
+>     DBG(20, "\n[Setup Packet] %02x %02x %02x %02x %02x %02x %02x %02x\n"
+> 	"addr = %x, data = %x, flags = %x, actlen = %x\n",
+> 	creq.ucr_request.bmRequestType,
+> 	creq.ucr_request.bRequest,
+> 	creq.ucr_request.wValue[0], creq.ucr_request.wValue[1],
+> 	creq.ucr_request.wIndex[0], creq.ucr_request.wIndex[1],
+> 	creq.ucr_request.wLength[0], creq.ucr_request.wLength[1],
+> 	creq.ucr_addr, creq.ucr_data, creq.ucr_flags, creq.ucr_actlen);
+>       
+>     if (ioctl(sfd, USB_DO_REQUEST, &creq) == 0)
+>       status =  SANE_STATUS_GOOD;
+>     else
+>       status =  SANE_STATUS_INVAL;
+> #endif
+> 
+>     DBG (30, ">>\n");
+> 
+>     return (status);
+> }
+> 
+> /*
+>  * usb_write_ioctl
+>  *
+>  *
+>  */
+> static SANE_Status
+> usb_write_ioctl(int sfd, u_char cdb[], void *buf, size_t *length)
+> {
+>     SANE_Status status;
+> 
+> #ifdef SUPPORT_SANEI
+>     int	rtype, req, value, index;
+> 
+>     DBG (11, "<< usb_write_ioctl(SANEI_USB) ");
+> 
+>     rtype = 0x40;
+>     req = cdb[0];
+>     value = cdb[2];
+>     value |= cdb[5] << 8;
+>     index = 0;
+> 
+>     DBG(20, "\n[Setup Packet] %02x %02x %02x %02x %02x %02x %02x %02x\n",
+> 	rtype,
+> 	req,
+> 	value & 0xff, (value >> 8) & 0xff,
+> 	index & 0xff, (index >> 8) & 0xff,
+> 	*length & 0xff,  (*length >> 8) & 0xff
+> 	);
+> 
+>     status = sanei_usb_control_msg(sfd, rtype, req, value, index, *length, buf);
+> #else
+>     struct usb_ctl_request creq;
+> 
+>     DBG (11, "<< usb_write_ioctl ");
+> 
+>     creq.ucr_addr = 0;
+>     creq.ucr_request.bmRequestType = 0x40;
+>     creq.ucr_request.bRequest = cdb[0];
+>     creq.ucr_request.wValue[0] = cdb[2];
+>     creq.ucr_request.wValue[1] = 0;
+>     creq.ucr_request.wIndex[0] = 0;
+>     creq.ucr_request.wIndex[1] = 0;
+>     creq.ucr_request.wLength[0] = *length & 0xff;
+>     creq.ucr_request.wLength[1] = (*length << 8) & 0xff;
+> 
+>     creq.ucr_data = buf;
+>     creq.ucr_flags = 0;
+>     creq.ucr_actlen = 0;
+> 
+>     DBG(30, "\n[Setup Packet] %02x %02x %02x %02x %02x %02x %02x %02x\n"
+> 	"addr = %02x, data = %08x, flags = %02x, actlen = %02x\n",
+> 	creq.ucr_request.bmRequestType,
+> 	creq.ucr_request.bRequest,
+> 	creq.ucr_request.wValue[0], creq.ucr_request.wValue[1],
+> 	creq.ucr_request.wIndex[0], creq.ucr_request.wIndex[1],
+> 	creq.ucr_request.wLength[0], creq.ucr_request.wLength[1],
+> 	creq.ucr_addr, creq.ucr_data, creq.ucr_flags, creq.ucr_actlen);
+> 
+>     if (ioctl(sfd, USB_DO_REQUEST, &creq) == 0)
+>       status =  SANE_STATUS_GOOD;
+>     else
+>       status =  SANE_STATUS_INVAL;
+> 
+>     DBG(30, "\naddr = %02x, data = %08x, flags = %02x, actlen = %02x\n",
+> 	creq.ucr_addr, creq.ucr_data, creq.ucr_flags, creq.ucr_actlen);
+> #endif
+> 
+>     DBG (30, ">>\n");
+> 
+>     return (status);
+> }
+> #endif /* USB_X12USL */
+486c856,858
+< 
+---
+> #ifdef	SUPPORT_SANEI 
+>     sanei_usb_init ();
+> #endif
+574,575c946,947
+<     /* check whether the file with the passwords exists. If it doesn´t */
+<     /* exist, we don´t use any authorization */
+---
+>     /* check whether the file with the passwords exists. If it doesn(I4(Bt */
+>     /* exist, we don(I4(Bt use any authorization */
+621,622c993,1041
+< 
+<     nread = read(ms->fd[0], (void *) buf, (int) maxlen);
+---
+> #ifdef USB_X12USL
+>     if (md_options.usbflag)
+>       {
+> 	size_t n;
+> 	SANE_Status status;
+> 	n = maxlen;
+> 	if (n > ms->remaining_bytes)
+> 	  n = ms->remaining_bytes;
+> 	status = read_sysinfo(ms, &n);
+> 	if (status == SANE_STATUS_GOOD)
+> 	  {
+> 	    DBG(30, "usb read: start(sane_read)\n");
+> 	    if (ms->remaining_bytes == 0)
+> 	      {
+> 		n = 0;
+> 	      }
+> 	    else
+> 	      {
+> #ifdef SUPPORT_SANEI
+> 		status = sanei_usb_read_bulk(ms->sfd, buf, &n);
+> 		if (status == SANE_STATUS_GOOD)
+> 		  {
+> 		    ms->remaining_bytes -= n;
+> 		    DBG(30, "read succeed(n = %d, ms->remaining_bytes = %d)\n", n, ms->remaining_bytes);
+> 		  }
+> #else
+> 		if(0 < (n = read(ms->sfd, buf, n)))
+> 		  {
+> 		    status = SANE_STATUS_GOOD;
+> 		    ms->remaining_bytes -= n;
+> 		    DBG(30, "read succeed(n = %d, ms->remaining_bytes = %d)\n", n, ms->remaining_bytes);
+> 		  }
+> 		else
+> 		  {
+> 		    DBG(0, "read error status = %d\n", errno);
+> 		    status = SANE_STATUS_IO_ERROR;
+> 		  }
+> #endif
+> 	      }
+> 	  }
+> 	else
+> 	  {
+> 	    n = -1;
+> 	  }
+> 	  nread = n;
+>       }
+>     else
+> #endif /* USB_X12USL */
+>       nread = read(ms->fd[0], (void *) buf, (int) maxlen);
+916c1335
+<     /* is an option line, i.e. a line that starts with ´option´ */
+---
+>     /* is an option line, i.e. a line that starts with (I4(Boption(I4(B */
+1144a1564,1568
+> #ifdef USB_X12USL
+> #ifdef SUPPORT_NEC
+>          && strncmp("NEC     ", mi->vendor, INQ_VENDOR_L) != 0
+> #endif /* SUPPORT_NEC */
+> #endif /* USB_X12USL */
+1284a1709,1715
+> #ifdef USB_X12USL
+> #ifdef SUPPORT_NEC
+>         case 0xc6:
+> 	   *model_string = "NEC MultiReader 1200U";
+> 	   break;
+> #endif /* SUPPORT_NEC */
+> #endif /* USB_X12USL */
+1309c1740,1751
+<       sanei_scsi_close(ms->sfd);
+---
+>       {
+> #ifdef USB_X12USL
+> 	if (md_options.usbflag)
+> #ifdef SUPPORT_SANEI
+> 	  sanei_usb_close(ms->sfd);
+> #else
+> 	  close(ms->sfd);
+> #endif
+> 	else
+> #endif /* USB_X12USL */
+> 	  sanei_scsi_close(ms->sfd);
+>       }
+1386c1828
+<     /* file exists, but can´t be opened the authentication fails */
+---
+>     /* file exists, but can(I4(Bt be opened the authentication fails */
+1406c1848
+<     /* first check if an entry exists in for this device. If not, we don´t */
+---
+>     /* first check if an entry exists in for this device. If not, we don(I4(Bt */
+1475c1917
+<                 continue;                  /* username doesn´t match */
+---
+>                 continue;                  /* username doesn(I4(Bt match */
+1670a2113,2117
+> #ifdef USB_X12USL
+> #ifdef SUPPORT_NEC
+>       case 0xc6: DBG(1,  "NEC MultiReader 1200U\n"); break;
+> #endif /* SUPPORT_NEC */
+> #endif /* USB_X12USL */
+3526c3973
+<     /* if we don´t have a gamma table return immediately */
+---
+>     /* if we don(I4(Bt have a gamma table return immediately */
+4154c4601,4630
+<         status = sanei_scsi_cmd(ms->sfd, cmd, size + SG_CMD_L, NULL, 0);
+---
+> #ifdef USB_X12USL
+> 	if (md_options.usbflag)
+> 	  {
+> 	    status = send_gamma(ms, cmd);
+> 	    if (status == SANE_STATUS_GOOD)
+> 	      {
+> #ifdef SUPPORT_SANEI
+> 		DBG(30, "usb write: start\n");
+> 		status = sanei_usb_write_bulk(ms->sfd, ms->gamma_table, &size);
+> #else
+> 		int n;
+> 		DBG(30, "usb write: start\n");
+> 		if(0 < (n = write(ms->sfd, ms->gamma_table, size)))
+> 		  {
+> 		    status = SANE_STATUS_GOOD;
+> 		    DBG(30, "write succeed(n = %d[%x]\n", n, n);
+> 		  }
+> 		else
+> 		  {
+> 		    DBG(0, "write error status = %d\n", errno);
+> 		    status = SANE_STATUS_IO_ERROR;
+> 		  }
+> #endif
+> 	      }
+> 	    else
+> 	      status = status;
+> 	  }
+> 	else
+> #endif /* USB_X12USL */
+> 	  status = sanei_scsi_cmd(ms->sfd, cmd, size + SG_CMD_L, NULL, 0);
+4184c4660,4689
+<             status = sanei_scsi_cmd(ms->sfd, cmd, size + SG_CMD_L, NULL, 0);
+---
+> #ifdef USB_X12USL
+> 	    if (md_options.usbflag)
+> 	      {
+> 		status = send_gamma(ms, cmd);
+> 		if (status == SANE_STATUS_GOOD)
+> 		  {
+> #ifdef SUPPORT_SANEI
+> 		    DBG(30, "usb write: start\n");
+> 		    status = sanei_usb_write_bulk(ms->sfd, ms->gamma_table, &size);
+> #else
+> 		    int n;
+> 		    DBG(30, "usb write: start\n");
+> 		    if(0 < (n = write(ms->sfd, ms->gamma_table, size)))
+> 		      {
+> 			status = SANE_STATUS_GOOD;
+> 			DBG(30, "write succeed(n = %d[%x]\n", n, n);
+> 		      }
+> 		    else
+> 		      {
+> 			DBG(0, "write error status = %d\n", errno);
+> 			status = SANE_STATUS_IO_ERROR;
+> 		      }
+> #endif
+> 		  }
+> 		else
+> 		  status = status;
+> 	      }
+> 	    else
+> #endif /* USB_X12USL */
+> 	      status = sanei_scsi_cmd(ms->sfd, cmd, size + SG_CMD_L, NULL, 0);
+4210c4715,4751
+<     status = sanei_scsi_open(device, &sfd, scsi_sense_handler, 0);
+---
+> #ifdef USB_X12USL
+>     if (md_options.usbflag) 
+>       {
+> #ifdef SUPPORT_SANEI
+> 	status = sanei_usb_open(device, &sfd);
+> #else
+> 	int flags;
+> #ifdef _O_RDWR
+> 	flags = _O_RDWR;
+> #else
+> 	flags = O_RDWR;
+> #endif
+> #ifdef _O_EXCL
+> 	flags |= _O_EXCL;
+> #else
+> 	flags |= O_EXCL;
+> #endif
+> #ifdef _O_BINARY
+> 	flags |= _O_BINARY;
+> #endif
+> #ifdef O_BINARY
+> 	flags |= O_BINARY;
+> #endif
+> 	sfd = open(device, flags);
+> 	if (sfd < 0) {
+> 	  DBG( 1, "open_scanner: %s open failed: %s\n", 
+> 	       device, strerror(errno));
+> 	  status = (errno == EACCES) ? SANE_STATUS_ACCESS_DENIED 
+> 	    : SANE_STATUS_INVAL;
+> 	}else
+> 	  status = SANE_STATUS_GOOD;
+> #endif
+>       }
+>     else
+> #endif /* USB_X12USL */
+>       status = sanei_scsi_open(device, &sfd, scsi_sense_handler, 0);
+> 
+4223c4764,4773
+<         sanei_scsi_close(sfd);
+---
+> #ifdef USB_X12USL
+> 	if (md_options.usbflag)
+> #ifdef SUPPORT_SANEI
+> 	  sanei_usb_close(sfd);
+> #else
+> 	  close(sfd);
+> #endif
+> 	else
+> #endif /* USB_X12USL */
+> 	  sanei_scsi_close(sfd);
+4228c4778,4783
+<     status = sanei_scsi_cmd(sfd, cmd, sizeof(cmd), result, &size);
+---
+> #ifdef USB_X12USL
+>     if (md_options.usbflag)
+>       status = usb_read_ioctl(sfd, (u_char *)&cmd, result, &size);
+>     else
+> #endif /* USB_X12USL */
+>       status = sanei_scsi_cmd(sfd, cmd, sizeof(cmd), result, &size);
+4232c4787,4796
+<         sanei_scsi_close(sfd);
+---
+> #ifdef USB_X12USL
+> 	if (md_options.usbflag)
+> #ifdef SUPPORT_SANEI
+> 	  sanei_usb_close(sfd);
+> #else
+> 	  close(sfd);
+> #endif
+> 	else
+> #endif /* USB_X12USL */
+> 	  sanei_scsi_close(sfd);
+4242c4806,4815
+<         sanei_scsi_close(sfd);
+---
+> #ifdef USB_X12USL
+> 	if (md_options.usbflag)
+> #ifdef SUPPORT_SANEI
+> 	  sanei_usb_close(sfd);
+> #else
+> 	  close(sfd);
+> #endif
+> 	else
+> #endif /* USB_X12USL */
+> 	  sanei_scsi_close(sfd);
+4249c4822,4827
+<     status = sanei_scsi_cmd(sfd, cmd, sizeof(cmd), result, &size);
+---
+> #ifdef USB_X12USL
+>     if (md_options.usbflag)
+>       status = usb_read_ioctl(sfd, (u_char *)&cmd, result, &size);
+>     else
+> #endif /* USB_X12USL */
+>       status = sanei_scsi_cmd(sfd, cmd, sizeof(cmd), result, &size);
+4253c4831,4840
+<         sanei_scsi_close(sfd);
+---
+> #ifdef USB_X12USL
+> 	if (md_options.usbflag)
+> #ifdef SUPPORT_SANEI
+> 	  sanei_usb_close(sfd);
+> #else
+> 	  close(sfd);
+> #endif
+> 	else
+> #endif /* USB_X12USL */
+> 	  sanei_scsi_close(sfd);
+4256c4843,4855
+<     sanei_scsi_close(sfd);
+---
+> #ifdef USB_X12USL
+>     if (md_options.usbflag)
+> #ifdef SUPPORT_SANEI
+>       {
+> 	DBG(1, "scsi_inquiry: close \n");
+> 	sanei_usb_close(sfd);
+>       }
+> #else
+>       close(sfd);
+> #endif
+>     else
+> #endif /* USB_X12USL */
+>       sanei_scsi_close(sfd);
+4298c4897,4932
+<     status = sanei_scsi_open(device, &sfd, scsi_sense_handler, 0);
+---
+> #ifdef USB_X12USL
+>     if (md_options.usbflag) 
+>       {
+> #ifdef SUPPORT_SANEI
+> 	status = sanei_usb_open(device, &sfd);
+> #else
+> 	int flags;
+> #ifdef _O_RDWR
+> 	flags = _O_RDWR;
+> #else
+> 	flags = O_RDWR;
+> #endif
+> #ifdef _O_EXCL
+> 	flags |= _O_EXCL;
+> #else
+> 	flags |= O_EXCL;
+> #endif
+> #ifdef _O_BINARY
+> 	flags |= _O_BINARY;
+> #endif
+> #ifdef O_BINARY
+> 	flags |= O_BINARY;
+> #endif
+> 	sfd = open(device, flags);
+> 	if (sfd < 0) {
+> 	  DBG( 1, "open_scanner: %s open failed: %s\n", 
+> 	       device, strerror(errno));
+> 	  status = (errno == EACCES) ? SANE_STATUS_ACCESS_DENIED 
+> 	    : SANE_STATUS_INVAL;
+> 	}else
+> 	  status = SANE_STATUS_GOOD;
+> #endif
+>       }
+>     else
+> #endif /* USB_X12USL */
+>       status = sanei_scsi_open(device, &sfd, scsi_sense_handler, 0);
+4309,4310c4943,4949
+<     status = sanei_scsi_cmd(sfd, readattributes,
+<                             sizeof(readattributes), result, &size);
+---
+> #ifdef USB_X12USL
+>     if (md_options.usbflag)
+>       status = usb_read_ioctl(sfd, (u_char *)&readattributes, result, &size);
+>     else
+> #endif /* USB_X12USL */
+>       status = sanei_scsi_cmd(sfd, readattributes,
+> 			      sizeof(readattributes), result, &size);
+4314c4953,4962
+<         sanei_scsi_close(sfd);
+---
+> #ifdef USB_X12USL
+> 	if (md_options.usbflag)
+> #ifdef SUPPORT_SANEI
+> 	  sanei_usb_close(sfd);
+> #else
+> 	  close(sfd);
+> #endif
+> 	else
+> #endif /* USB_X12USL */
+> 	  sanei_scsi_close(sfd);
+4318c4966,4978
+<     sanei_scsi_close(sfd);
+---
+> #ifdef USB_X12USL
+>     if (md_options.usbflag)
+> #ifdef SUPPORT_SANEI
+>       {
+> 	DBG(30, "read_attributes:close");
+> 	sanei_usb_close(sfd);
+>       }
+> #else
+>       close (sfd);
+> #endif
+>     else
+> #endif /* USB_X12USL */
+>       sanei_scsi_close(sfd);
+4346a5007,5009
+> #ifdef USB_X12USL
+>     if ( mi->model_code == 0xb0 || mi->model_code == 0xc6)
+> #else
+4347a5011
+> #endif /* USB_X12USL */
+4443c5107,5110
+< 
+---
+> #ifdef USB_X12USL
+>     Microtek2_Device *md;
+>     Microtek2_Info *mi;
+> #endif /* USB_X12USL */
+4446a5114,5118
+> #ifdef USB_X12USL
+>     md = ms->dev;
+>     mi = &md->info[md->scan_source];
+> #endif /* USB_X12USL */
+> 
+4518c5190,5201
+<     status = sanei_scsi_cmd(ms->sfd, setwindow, size, NULL, 0);
+---
+> #ifdef USB_X12USL
+>     if (md_options.usbflag)
+>       {
+> 	size_t size;
+> 	size = SW_HEADER_L + n * SW_BODY_L;
+> 	DBG(1, "scsi_set_window: size = '%d'\n", size);
+> 	/*	status = usb_write_ioctl(ms->sfd, (u_char *)setwindow, setwindow+SW_CMD_L, &size);*/
+> 	status = usb_read_ioctl(ms->sfd, (u_char *)setwindow, setwindow+SW_CMD_L, &size);
+>       }
+>     else
+> #endif /* USB_X12USL */
+>       status = sanei_scsi_cmd(ms->sfd, setwindow, size, NULL, 0);
+4551c5234,5239
+<     status = sanei_scsi_cmd(ms->sfd, cmd, sizeof(cmd), result, &size);
+---
+> #ifdef USB_X12USL
+>     if (md_options.usbflag)
+>       status = usb_read_ioctl(ms->sfd, (u_char *)&cmd, result, &size);
+>     else
+> #endif /* USB_X12USL */
+>       status = sanei_scsi_cmd(ms->sfd, cmd, sizeof(cmd), result, &size);
+4583d5270
+< 
+4609c5296,5326
+<     status = sanei_scsi_cmd(ms->sfd, cmd, sizeof(cmd), buffer, &size);
+---
+> #ifdef USB_X12USL
+>     if (md_options.usbflag)
+>       {
+> 	status = read_sysinfo(ms, &size);
+> 	if (status == SANE_STATUS_GOOD)
+> 	  {
+> #ifdef SUPPORT_SANEI
+> 	    DBG(30, "usb read: start\n");
+> 	    status = sanei_usb_read_bulk(ms->sfd, buffer, &size);
+> #else
+> 	    int n;
+> 	    DBG(30, "usb read: start\n");
+> 	    if(0 < (n = read(ms->sfd, buffer, size)))
+> 	      {
+> 		ms->remaining_bytes -= n;
+> 		status = SANE_STATUS_GOOD;
+> 		DBG(30, "read succeed(n = %d)\n", n);
+> 	      }
+> 	    else
+> 	      {
+> 		DBG(0, "read error status = %d\n", errno);
+> 		status = SANE_STATUS_IO_ERROR;
+> 	      }
+> #endif
+> 	  }
+> 	else
+> 	  status = status;
+>       }
+>     else
+> #endif /* USB_X12USL */
+>       status = sanei_scsi_cmd(ms->sfd, cmd, sizeof(cmd), buffer, &size);
+4643a5361,5363
+> #ifdef USB_X12USL
+>     mi->new_image_status = SANE_TRUE;    /* for testing*/
+> #else
+4645c5365
+< 
+---
+> #endif /* USB_X12USL */
+4662c5382,5389
+<     status = sanei_scsi_cmd(ms->sfd, cmd, sizeof(cmd), &dummy, &dummy_length);
+---
+> #ifdef USB_X12USL
+>     if (md_options.usbflag)
+>       {
+> 	status = usb_read_ioctl(ms->sfd, (u_char *)&cmd, &dummy, &dummy_length);
+>       }
+>     else
+> #endif /* USB_X12USL */
+>       status = sanei_scsi_cmd(ms->sfd, cmd, sizeof(cmd), &dummy, &dummy_length);
+4724c5451,5456
+<     status = sanei_scsi_cmd(ms->sfd, cmd, sizeof(cmd), buffer, &size);
+---
+> #ifdef USB_X12USL
+>     if (md_options.usbflag)
+>       status = usb_read_ioctl(ms->sfd, (u_char *)&cmd, buffer, &size);
+>     else
+> #endif /* USB_X12USL */
+>       status = sanei_scsi_cmd(ms->sfd, cmd, sizeof(cmd), buffer, &size);
+4779c5511,5540
+<     status = sanei_scsi_cmd(ms->sfd, cmd, size + SSI_CMD_L, NULL, 0);
+---
+> #ifdef USB_X12USL
+>     if (md_options.usbflag)
+>       {
+> 	status = send_shading(ms, cmd);
+> 	if (status == SANE_STATUS_GOOD)
+> 	  {
+> #ifdef SUPPORT_SANEI
+> 	    DBG(30, "usb write: start\n");
+> 	    sanei_usb_write_bulk(ms->sfd, shading_data, &size);
+> #else
+> 	    int n;
+> 	    DBG(30, "usb write: start\n");
+> 	    if(0 < (n = write(ms->sfd, shading_data, size)))
+> 	      {
+> 		status = SANE_STATUS_GOOD;
+> 	    DBG(30, "write succeed(n = %d[%x]\n", n, n);
+> 	      }
+> 	    else
+> 	      {
+> 		DBG(0, "write error status = %d\n", errno);
+> 		status = SANE_STATUS_IO_ERROR;
+> 	      }
+> #endif
+> 	  }
+> 	else
+> 	  status = status;
+>       }
+>     else
+> #endif /* USB_X12USL */
+>       status = sanei_scsi_cmd(ms->sfd, cmd, size + SSI_CMD_L, NULL, 0);
+4806c5567,5603
+<         status = sanei_scsi_open(md->name, &sfd, scsi_sense_handler, 0);
+---
+> #ifdef USB_X12USL
+> 	if (md_options.usbflag) 
+> 	  {
+> #ifdef SUPPORT_SANEI
+> 	    status = sanei_usb_open(md->name, &sfd);
+> #else
+> 	    int flags;
+>     
+> #ifdef _O_RDWR
+> 	    flags = _O_RDWR;
+> #else
+> 	    flags = O_RDWR;
+> #endif
+> #ifdef _O_EXCL
+> 	    flags |= _O_EXCL;
+> #else
+> 	    flags |= O_EXCL;
+> #endif
+> #ifdef _O_BINARY
+> 	    flags |= _O_BINARY;
+> #endif
+> #ifdef O_BINARY
+> 	    flags |= O_BINARY;
+> #endif
+> 	    sfd = open(md->name, flags);
+> 	    if (sfd < 0) {
+> 	      DBG( 1, "open_scanner: %s open failed: %s\n", 
+> 		   md->name, strerror(errno));
+> 	      status = (errno == EACCES) ? SANE_STATUS_ACCESS_DENIED 
+> 		: SANE_STATUS_INVAL;
+> 	    }else
+> 	      status = SANE_STATUS_GOOD;
+> #endif
+> 	  }
+> 	else
+> #endif /* USB_X12USL */
+> 	  status = sanei_scsi_open(md->name, &sfd, scsi_sense_handler, 0);
+4823c5620,5625
+<     status = sanei_scsi_cmd(sfd, cmd, sizeof(cmd), result, &size);
+---
+> #ifdef USB_X12USL
+>     if (md_options.usbflag)
+>       status = usb_read_ioctl(sfd, (u_char *)&cmd, result, &size);
+>     else
+> #endif /* USB_X12USL */
+>       status = sanei_scsi_cmd(sfd, cmd, sizeof(cmd), result, &size);
+4828c5630,5639
+<         sanei_scsi_close(sfd);
+---
+> #ifdef USB_X12USL
+> 	if (md_options.usbflag)
+> #ifdef SUPPORT_SANEI
+> 	  sanei_usb_close(sfd);
+> #else
+> 	  close (sfd);
+> #endif
+> 	else
+> #endif /* USB_X12USL */
+> 	  sanei_scsi_close(sfd);
+4833c5644,5655
+<         sanei_scsi_close(sfd);
+---
+>       {
+> #ifdef USB_X12USL
+> 	if (md_options.usbflag)
+> #ifdef SUPPORT_SANEI
+> 	  sanei_usb_close(sfd);
+> #else
+> 	  close (sfd);
+> #endif
+> 	else
+> #endif /* USB_X12USL */
+> 	  sanei_scsi_close(sfd);
+>       }
+4884c5706,5711
+<     status = sanei_scsi_cmd(ms->sfd,  requestsense, sizeof(requestsense),
+---
+> #ifdef USB_X12USL
+>     if (md_options.usbflag)
+>       status = usb_read_ioctl(ms->sfd, (u_char *)&requestsense, buffer, &size);
+>     else
+> #endif /* USB_X12USL */
+>       status = sanei_scsi_cmd(ms->sfd,  requestsense, sizeof(requestsense),
+4922a5750,5785
+> #ifdef USB_X12USL
+>       if (md_options.usbflag) 
+> 	{
+> #ifdef SUPPORT_SANEI
+> 	  status = sanei_usb_open(md->name, &sfd);
+> #else
+> 	  int flags;
+>     
+> #ifdef _O_RDWR
+> 	  flags = _O_RDWR;
+> #else
+> 	  flags = O_RDWR;
+> #endif
+> #ifdef _O_EXCL
+> 	  flags |= _O_EXCL;
+> #else
+> 	  flags |= O_EXCL;
+> #endif
+> #ifdef _O_BINARY
+> 	  flags |= _O_BINARY;
+> #endif
+> #ifdef O_BINARY
+> 	  flags |= O_BINARY;
+> #endif
+> 	  sfd = open(md->name, flags);
+> 	  if (sfd < 0) {
+> 	    DBG( 1, "open_scanner: %s open failed: %s\n", 
+> 		 md->name, strerror(errno));
+> 	    status = (errno == EACCES) ? SANE_STATUS_ACCESS_DENIED 
+> 	      : SANE_STATUS_INVAL;
+> 	  }else
+> 	    status = SANE_STATUS_GOOD;
+> #endif
+> 	}
+>       else
+> #endif /* USB_X12USL */
+4961c5824,5834
+<     status = sanei_scsi_cmd(sfd, cmd, sizeof(cmd), NULL, 0);
+---
+> #ifdef USB_X12USL
+>     if (md_options.usbflag)
+>       {
+> 	size_t size;
+> 	size = 9;
+> 	/*	status = usb_write_ioctl(sfd, (u_char *)&cmd, pos, &size);*/
+> 	status = usb_read_ioctl(sfd, (u_char *)&cmd, pos, &size);
+>       }
+>     else
+> #endif /* USB_X12USL */
+>       status = sanei_scsi_cmd(sfd, cmd, sizeof(cmd), NULL, 0);
+4966c5839,5850
+<         sanei_scsi_close(sfd);
+---
+>       {
+> #ifdef USB_X12USL
+> 	if (md_options.usbflag)
+> #ifdef SUPPORT_SANEI
+> 	  sanei_usb_close(sfd);
+> #else
+> 	  close (sfd);
+> #endif
+> 	else
+> #endif /* USB_X12USL */
+> 	  sanei_scsi_close(sfd);
+>       }
+5137c6021,6058
+<     status = sanei_scsi_open(md->name, &sfd, scsi_sense_handler, 0);
+---
+> 
+> #ifdef USB_X12USL
+>     if (md_options.usbflag) 
+>       {
+> #ifdef SUPPORT_SANEI
+> 	status = sanei_usb_open(md->name, &sfd);
+> #else
+> 	int flags;
+>     
+> #ifdef _O_RDWR
+> 	flags = _O_RDWR;
+> #else
+> 	flags = O_RDWR;
+> #endif
+> #ifdef _O_EXCL
+> 	flags |= _O_EXCL;
+> #else
+> 	flags |= O_EXCL;
+> #endif
+> #ifdef _O_BINARY
+> 	flags |= _O_BINARY;
+> #endif
+> #ifdef O_BINARY
+> 	flags |= O_BINARY;
+> #endif
+> 	sfd = open(md->name, flags);
+> 	if (sfd < 0) {
+> 	  DBG( 1, "open_scanner: %s open failed: %s\n", 
+> 	       md->name, strerror(errno));
+> 	  status = (errno == EACCES) ? SANE_STATUS_ACCESS_DENIED 
+> 	    : SANE_STATUS_INVAL;
+> 	}else
+> 	  status = SANE_STATUS_GOOD;
+> #endif
+>       }
+>     else
+> #endif /* USB_X12USL */
+>       status = sanei_scsi_open(md->name, &sfd, scsi_sense_handler, 0);
+5147c6068,6083
+<     status = sanei_scsi_cmd(sfd, tur, sizeof(tur), NULL, 0);
+---
+> #ifdef USB_X12USL
+>     if (md_options.usbflag)
+>       {
+> 	size_t size;
+> 	size = 0;
+> #ifdef __FreeBSD__
+> 	status = usb_read_ioctl(sfd, (u_char *)&tur, NULL, &size);
+> #elif __linux__
+> 	/* test unit ready cannot be used in linux */
+> 	/* I think problem is in ioctl....... */
+> 	status = SANE_STATUS_GOOD;
+> #endif
+>       }
+>     else
+> #endif /* USB_X12USL */
+>       status = sanei_scsi_cmd(sfd, tur, sizeof(tur), NULL, 0);
+5151c6087,6096
+<     sanei_scsi_close(sfd); 
+---
+> #ifdef USB_X12USL
+>     if (md_options.usbflag)
+> #ifdef SUPPORT_SANEI
+>       sanei_usb_close(sfd);
+> #else
+>       close (sfd);
+> #endif
+>     else
+> #endif /* USB_X12USL */
+>       sanei_scsi_close(sfd); 
+5191c6136,6173
+<         status = sanei_scsi_open (md->sane.name, &ms->sfd,
+---
+> #ifdef USB_X12USL
+> 	if (md_options.usbflag) 
+> 	  {
+> #ifdef SUPPORT_SANEI
+> 	    status = sanei_usb_open(md->sane.name, &ms->sfd);
+> #else
+> 
+> 	    int flags;
+>     
+> #ifdef _O_RDWR
+> 	    flags = _O_RDWR;
+> #else
+> 	    flags = O_RDWR;
+> #endif
+> #ifdef _O_EXCL
+> 	    flags |= _O_EXCL;
+> #else
+> 	    flags |= O_EXCL;
+> #endif
+> #ifdef _O_BINARY
+> 	    flags |= _O_BINARY;
+> #endif
+> #ifdef O_BINARY
+> 	    flags |= O_BINARY;
+> #endif
+> 	    ms->sfd = open(md->sane.name, flags);
+> 	    if (ms->sfd < 0) {
+> 	      DBG( 1, "open_scanner: %s open failed: %s\n", 
+> 		   md->sane.name, strerror(errno));
+> 	      status = (errno == EACCES) ? SANE_STATUS_ACCESS_DENIED 
+> 		: SANE_STATUS_INVAL;
+> 	    }else
+> 	      status = SANE_STATUS_GOOD;
+> #endif
+> 	  }
+> 	else
+> #endif /* USB_X12USL */
+> 	  status = sanei_scsi_open (md->sane.name, &ms->sfd,
+5357a6340,6344
+> #ifdef USB_X12USL
+>     /* fork cannot be used in X12USL(USB) */
+>     if (!md_options.usbflag)
+>       {
+> #endif /* USB_X12USL */
+5382a6370,6372
+> #ifdef USB_X12USL
+>       }
+> #endif /* USB_X12USL */
+6860c7850
+<     /* be the case for all models with the data format ´chunky data´. They */
+---
+>     /* be the case for all models with the data format (I4(Bchunky data(I4(B. They */
+Index: sane/sane-backends/backend/microtek2.h
+===================================================================
+RCS file: /cvsroot/external/sane/sane-backends/backend/microtek2.h,v
+retrieving revision 1.9
+diff -r1.9 microtek2.h
+730a731,733
+> #ifdef USB_X12USL
+>     u_int8_t usbflag;                   /* use USB interaface */
+> #endif /* USB_X12USL */
+Index: sane/sane-backends/sanei/sanei_usb.c
+===================================================================
+RCS file: /cvsroot/external/sane/sane-backends/sanei/sanei_usb.c,v
+retrieving revision 1.15
+diff -r1.15 sanei_usb.c
+54a55,57
+> #ifdef __FreeBSD__
+>  #include <dev/usb/usb.h>
+> #endif
+124c127,128
+< #endif /* __linux__ */
+---
+> #elif defined (__FreeBSD__)
+> #endif
+222c226,228
+< #endif /* defined (__linux__) */
+---
+> #elif defined (__FreeBSD__)
+> 
+> #endif
+367a374
+> 
+777c784,810
+< #else /* not __linux__ */
+---
+> #elif defined (__FreeBSD__)
+>       struct usb_ctl_request creq;
+>       creq.ucr_addr = 0;
+>       creq.ucr_request.bmRequestType = rtype;
+>       creq.ucr_request.bRequest = req;
+>       creq.ucr_request.wValue[0] = value & 0xff;
+>       creq.ucr_request.wValue[1] = (value >> 8) & 0xff;
+>       creq.ucr_request.wIndex[0] = index & 0xff;
+>       creq.ucr_request.wIndex[1] = (index >> 8) & 0xff;
+>       creq.ucr_request.wLength[0] = len & 0xff;
+>       creq.ucr_request.wLength[1] = (len >> 8) & 0xff;
+>       creq.ucr_data = data;
+>       creq.ucr_flags = 0;
+>       creq.ucr_actlen = 0;
+> 
+>       DBG (5, "sanei_usb_control_msg: rtype = 0x%02x, req = %d, value = %d, "
+> 	   "index = %d, len = %d\n", rtype, req, value, index, len);
+> 
+>       if (ioctl(devices[dn].fd, USB_DO_REQUEST, &creq) == 0)
+> 	return SANE_STATUS_GOOD;
+>       else{
+> 	DBG (5, "sanei_usb_control_msg: SCANNER_IOCTL_CTRLMSG error - %s\n",
+> 	     strerror (errno));
+> 	
+> 	return SANE_STATUS_IO_ERROR;
+>       }
+> #else /* not __linux__ or __FreeBSD__ */
+780c813
+< #endif /* not __linux__ */
+---
+> #endif

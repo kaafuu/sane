@@ -1,0 +1,177 @@
+*** scanner.c.orig	Sun Apr 29 23:11:30 2001
+--- scanner.c	Wed Jan 16 00:47:05 2002
+***************
+*** 623,631 ****
+--- 623,641 ----
+  			continue;
+  		}
+  		
++ #ifdef USB_X12USL
++ 		/* ScanMaker X12USL and MR1200U has */
++ 		/*    two bulk out   */                 
++ 		/*    one bulk in    */                 
++ 		/*    no  interrupt. */                 
++ 		if (IS_EP_BULK_OUT(endpoint[ep_cnt])) {
++ 			ep_cnt++;
++ 			have_bulk_out++;
++ #else
+  		if (!have_bulk_out && IS_EP_BULK_OUT(endpoint[ep_cnt])) {
+  			ep_cnt++;
+  			have_bulk_out = ep_cnt;
++ #endif /* USB_X12USL */
+  			dbg("probe_scanner: bulk_out_ep:%d", have_bulk_out);
+  			continue;
+  		}
+***************
+*** 654,661 ****
+--- 664,677 ----
+  		}
+  		break;
+  	case 3:
++ #ifdef USB_X12USL
++ 		/* ScanMaker X12USL and MultiReader 1200U doesn't have interrupt endpoint */
++ 		if (!have_bulk_in || !have_bulk_out) {
++ 			info("probe_scanner: Two or Three bulk endpoints required.");
++ #else
+  		if (!have_bulk_in || !have_bulk_out || !have_intr) {
+  			info("probe_scanner: Two bulk endpoints and one interrupt endpoint required.");
++ #endif /* USB_X12USL */
+  			return NULL;
+  		}
+  		break;
+***************
+*** 778,783 ****
+--- 794,858 ----
+  	
+  	switch (cmd)
+  	{
++ #ifdef USB_X12USL
++ 	case USB_DO_REQUEST:
++ 	{	
++ 		unsigned char *pbuf;
++ 		struct {
++ 			__u8  requesttype;
++ 			__u8  request;
++ 			__u16 value;
++ 			__u16 index;
++ 			__u16 length;
++ 
++ 			__u32 data;
++ 			__u32 addr;
++ 			__u32 flags;
++ 			__u32 actlen;
++ 		} args;
++ 
++ 		if (copy_from_user(&args, (void *)arg, sizeof(args)))
++ 			return -EFAULT;
++ 
++ 		dbg("ioctl_scanner(%d): request(%s): args.data:%x args.value:%x args.index:%x args.request:%x args.length:%x\n", scn_minor, args.requesttype & USB_DIR_IN ? "IN" : "OUT", args.data, args.value, args.index, args.request, args.length);
++ 
++ 		pbuf = (unsigned char *) kmalloc (args.length, GFP_KERNEL);
++ 		if (!pbuf) {
++ 			return -ENOMEM;
++ 		}
++ 		if (args.requesttype & USB_DIR_IN)
++ 		{
++ 			result = usb_control_msg(dev, usb_rcvctrlpipe(dev, 0),
++ 						 args.request, args.requesttype,
++ 						 args.value, args.index, pbuf,
++ 						 args.length, HZ*5);
++ 		}else{
++ 			if (copy_from_user(pbuf, args.data, args.length)) {
++ 				kfree (pbuf);
++ 				return -EFAULT;
++ 			}
++ 			result = usb_control_msg(dev, usb_sndctrlpipe(dev, 0),
++ 						 args.request, args.requesttype,
++ 						 args.value, args.index, pbuf,
++ 						 args.length, HZ*5);
++ 		}
++ 
++ 		dbg("ioctl_scanner(%d): [Setup Packet] %02x %02x %02x %02x %02x %02x %02x %02x \n\tdata:%08x addr:%08x flags:%08x actlen:%08x result:%08x\n", scn_minor, args.requesttype, args.request, args.value & 0xff, (args.value >> 8) & 0xff, args.index & 0xff, (args.index >> 8) & 0xff, args.length & 0xff, (args.length >> 8) & 0xff, args.data, args.addr, args.flags, args.actlen, result);
++ 
++ 		if (args.requesttype & USB_DIR_IN)
++ 			if (copy_to_user(args.data, pbuf, args.length)) 
++ 			{
++ 				kfree (pbuf);
++ 				return -EFAULT;
++ 			}
++ 		kfree (pbuf);
++ 
++ 		if (result >= 0)
++ 			return 0;
++ 		else
++ 			return result;
++ 	}
++ #endif /* USB_X12USL */
+  	case PV8630_IOCTL_INREQUEST :
+  	{
+  		struct {
+*** scanner.h.orig	Sun Apr 29 23:11:38 2001
+--- scanner.h	Wed Jan 16 01:04:38 2002
+***************
+*** 31,37 ****
+  #include <linux/ioctl.h>
+  #include <linux/sched.h>
+  
+! // #define DEBUG
+  
+  #include <linux/usb.h>
+  
+--- 31,37 ----
+  #include <linux/ioctl.h>
+  #include <linux/sched.h>
+  
+!  #define DEBUG
+  
+  #include <linux/usb.h>
+  
+***************
+*** 49,55 ****
+  
+  /* Enable to activate the ioctl interface.  This is mainly meant for */
+  /* development purposes until an ioctl number is officially registered */
+! // #define SCN_IOCTL
+  
+  /* WARNING: These DATA_DUMP's can produce a lot of data. Caveat Emptor. */
+  // #define RD_DATA_DUMP /* Enable to dump data - limited to 24 bytes */
+--- 49,55 ----
+  
+  /* Enable to activate the ioctl interface.  This is mainly meant for */
+  /* development purposes until an ioctl number is officially registered */
+!  #define SCN_IOCTL
+  
+  /* WARNING: These DATA_DUMP's can produce a lot of data. Caveat Emptor. */
+  // #define RD_DATA_DUMP /* Enable to dump data - limited to 24 bytes */
+***************
+*** 80,85 ****
+--- 80,97 ----
+  #define PV8630_IOCTL_INREQUEST 69
+  #define PV8630_IOCTL_OUTREQUEST 70
+  
++ #ifdef SCN_IOCTL
++ /* Microtek ScanMaker X12USL and NEC MultiReader 1200U
++    These scanner use ioctl interface. These has three Endpoint,
++    but it is different from X6USB.
++    MultiReader 1200U is OEM product by Microtek and this has only USB interface.
++ */
++ #define USB_X12USL
++ 
++ /* FIXME: These are NOT registered ioctls()'s */
++ #define USB_DO_REQUEST 71
++ #endif /* SCN_IOCTL */
++ 
+  #define SCN_MAX_MNR 16		/* We're allocated 16 minors */
+  #define SCN_BASE_MNR 48		/* USB Scanners start at minor 48 */
+  
+***************
+*** 132,137 ****
+--- 144,151 ----
+  		{ 0x05da, 0x00a3 },	/* ScanMaker V6USL */
+  		{ 0x05da, 0x80a3 },	/* ScanMaker V6USL #2 */
+  		{ 0x05da, 0x80ac },	/* ScanMaker V6UL - SpicyU */
++ 		{ 0x05da, 0x20b0 },	/* ScanMaker X12USL */
++ 		{ 0x05da, 0x20c6 },	/* NEC MultiReader 1200U */
+  	/* Mustek */
+  		{ 0x055f, 0x0001 },	/* 1200 CU */
+  	/* Primax/Colorado */

@@ -1,0 +1,75 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.0 Transitional//EN"> 
+<HTML>
+
+<HEAD>
+<META http-equiv="Content-Type" content="text/html; charset=iso-8859-1">
+<TITLE>SANE backend patch for MR1200U & ScanMaker X12USL</TITLE>
+</HEAD>
+
+<CENTER>
+<H1>Unofficial patch for Microtek2 backend</H1>
+</CENTER>
+<HR>
+<BR>
+
+I think that X12USL is only SCSI interface supported by <A href="http://karstenfestag.gmxhome.de/">microtek2 backend</A>.
+<BR>
+I write a patch for <A href="http://www.microtek.com">ScanMaker X12USL</A> and <A href="http://www.nevt.co.jp">NEC MultiReader 1200U</A> for USB interface.
+<BR>
+(MR1200U is OEM product by Microtek.)
+<BR>
+(MR1200U is custmized for NEC and sold only in Japan.)
+<BR>
+<BR>
+If you apply all my patch to the Latest <A href="http://home.t-online.de/home/karsten.festag/">microtek2 backend</A> (or <A href="http://www.sane-project.org/cvs.html">SANE CVS server</A>) and Linux or FreeBSD.
+<BR>
+You can use USB interface.(Support Linux and FreeBSD only)
+<BR>
+
+<HR>
+Problems
+<UL>
+  <LI>Toggle lamp of flatbed is not working.
+  <LI>And, after auto lamp off, next scanning is not working.
+  <LI>Weired vertical stripes when scanning.
+  <LI>Linux driver is not use microtek X6USB driver. Because X6USB and X12USL use different USB protocol. <br>X6USB uses only(?) bulk transefer. X12USL and MR1200U use control and bulk transfer.
+
+  <LI>I only test it on Kernel 2.2.17. (Kernel 2.5.2 is not support.)
+  <LI>I haven't find another problems.
+</UL>
+<HR>
+patch files
+<UL>2002
+  <LI><A href=http://www5a.biglobe.ne.jp/~saetaka/sane/microtek2/scanner-FreeBSD_20020913.patch>scanner-FreeBSD_20020913.patch(usbdevs and usbdevs.h)</A> for FreeBSD 4.6.2-RELEASE<font color="000080"> NEW!(Sep. 13)</font>
+  <LI><A href=http://www5a.biglobe.ne.jp/~saetaka/sane/microtek2/microtek2_20020821.patch>microtek2_20020821.patch</A> for Microtek2 backend(use sanei_usb.c)<font color="000080"> (Aug. 21)</font>
+  <LI><A href=http://www5a.biglobe.ne.jp/~saetaka/sane/microtek2/scanner-FreeBSD_20020821.patch>scanner-FreeBSD_20020821.patch(usbdevs and usbdevs.h)</A> for FreeBSD 4.6-RELEASE<font color="000080"> (Aug. 21)</font>
+  <LI><A href=http://www5a.biglobe.ne.jp/~saetaka/sane/microtek2/microtek2_20020807.patch>microtek2_20020807.patch</A> for Microtek2 backend(2002/08/07)<font color="000080"> (Aug. 8)</font>
+  <LI><A href=http://www5a.biglobe.ne.jp/~saetaka/sane/microtek2/scanner-FreeBSD_20020807.patch>scanner-FreeBSD_20020807.patch</A> for FreeBSD 4.6-RELEASE<font color="000080"> (Aug. 8)</font>
+<BR>This works under FreeBSD 4.6.2-RELEASE.
+</UL>
+<UL>2001
+  <LI><A href=http://www5a.biglobe.ne.jp/~saetaka/sane/microtek2/microtek2_0117.patch>microtek2_0117.patch</A> for microtek2_20011221.tar.gz
+  <LI><A href=http://www5a.biglobe.ne.jp/~saetaka/sane/microtek2/scanner-FreeBSD_0117.patch>scanner-FreeBSD_0117.patch</A> for FreeBSD 4.3/4.4-RELEASE
+  <LI><A href=http://www5a.biglobe.ne.jp/~saetaka/sane/microtek2/scanner-linux_0116.patch>scanner-linux_0116.patch</A> for Linux kernel 2.2.17
+</UL>
+
+<HR>
+TODO
+<UL>
+  <LI>To use sanei_usb.c
+  <LI>Support Linux kernel 2.5.2
+  <LI>To be included microtek2 backend.
+  <LI>resolve all problems.
+</UL>
+
+<HR>
+[<A href=http://www5a.biglobe.ne.jp/~saetaka/sane/sane-backend.html>Return</A>]
+<BR><BR><HR noshade>
+
+<ADDRESS>
+<A href="mailto:kaafuu@mug.biglobe.ne.jp">kaafuu@mug.biglobe.ne.jp</A><BR>
+Copyright (C) 1999-2005 kaafuu(Kazuya Fukuda) All rights reserved.<BR>
+$Date: 2005/06/22 01:13:56 $
+</ADDRESS>
+
+</HTML>

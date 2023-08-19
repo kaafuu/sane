@@ -1,0 +1,230 @@
+*** uscanner.c.orig	Thu Feb 14 11:52:50 2002
+--- uscanner.c	Sat Aug  3 14:38:37 2002
+***************
+*** 46,51 ****
+--- 46,52 ----
+  #include <sys/malloc.h>
+  #if defined(__NetBSD__) || defined(__OpenBSD__)
+  #include <sys/device.h>
++ #include <sys/ioctl.h>
+  #elif defined(__FreeBSD__)
+  #include <sys/module.h>
+  #include <sys/bus.h>
+***************
+*** 133,138 ****
+--- 134,141 ----
+   {{ USB_VENDOR_MICROTEK, USB_PRODUCT_MICROTEK_V6USL }, 0 },
+   {{ USB_VENDOR_MICROTEK, USB_PRODUCT_MICROTEK_V6USL2 }, 0 },
+   {{ USB_VENDOR_MICROTEK, USB_PRODUCT_MICROTEK_V6UL }, 0 },
++  {{ USB_VENDOR_MICROTEK, USB_PRODUCT_MICROTEK_X12USL }, 0 },
++  {{ USB_VENDOR_MICROTEK, USB_PRODUCT_MICROTEK_NEC_MR1200U }, 0 },
+  
+    /* Mustek */
+   {{ USB_VENDOR_MUSTEK, USB_PRODUCT_MUSTEK_1200CU }, 0 },
+***************
+*** 196,201 ****
+--- 199,218 ----
+  
+  #define	USCANNER_BUFFERSIZE	1024
+  
++ struct uscanner_endpoint {
++ 	struct uscanner_softc *sc;
++ 	usb_endpoint_descriptor_t *edesc;
++ 	usbd_interface_handle iface;
++ 	int state;
++ #define	USCANNER_ASLP	0x02	/* waiting for data */
++ #define USCANNER_SHORT_OK	0x04	/* short xfers are OK */
++ 	usbd_pipe_handle pipeh;
++ 	struct clist q;
++ 	struct selinfo rsel;
++ 	void *ibuf;
++ 	u_int32_t timeout;
++ };
++ 
+  struct uscanner_softc {
+  	USBBASEDEVICE		sc_dev;		/* base device */
+  	usbd_device_handle	sc_udev;
+***************
+*** 220,225 ****
+--- 237,246 ----
+  	u_char			sc_state;
+  #define USCANNER_OPEN		0x01	/* opened */
+  
++ 	struct uscanner_endpoint sc_endpoints[USB_MAX_ENDPOINTS][2];
++ #define OUT 0
++ #define IN  1
++ 
+  	int			sc_refcnt;
+  	u_char			sc_dying;
+  };
+***************
+*** 256,264 ****
+--- 277,288 ----
+  
+  Static int uscanner_do_read(struct uscanner_softc *, struct uio *, int);
+  Static int uscanner_do_write(struct uscanner_softc *, struct uio *, int);
++ Static int uscanner_do_ioctl __P((struct uscanner_softc *, int, u_long, 
++ 			      caddr_t, int, struct proc *));
+  Static void uscanner_do_close(struct uscanner_softc *);
+  
+  #define USCANNERUNIT(n) (minor(n))
++ #define USCANNERENDPOINT(n) (minor(n) & 0xf)
+  
+  USB_DECLARE_DRIVER(uscanner);
+  
+***************
+*** 553,558 ****
+--- 577,586 ----
+  	if (sc->sc_dying)
+  		return (EIO);
+  
++ 	DPRINTFN(5, ("%d: sc->sc_bulkout_bufferlen\n", sc->sc_bulkout_bufferlen));
++ 	DPRINTFN(5, ("%d: uio->uio_resid\n", uio->uio_resid));
++ 	DPRINTFN(5, ("%d, %d: buffer\n", (char *)sc->sc_bulkout_buffer, (char *)(sc->sc_bulkout_buffer+1)));
++ 
+  	while ((n = min(sc->sc_bulkout_bufferlen, uio->uio_resid)) != 0) {
+  		error = uiomove(sc->sc_bulkout_buffer, n, uio);
+  		if (error)
+***************
+*** 693,702 ****
+  	return (revents);
+  }
+  
+  int
+  uscannerioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
+  {
+! 	return (EINVAL);
+  }
+  
+  #if defined(__FreeBSD__)
+--- 721,850 ----
+  	return (revents);
+  }
+  
++ Static int
++ uscanner_do_ioctl(sc, endpt, cmd, addr, flag, p)
++ 	struct uscanner_softc *sc;
++ 	int endpt;
++ 	u_long cmd;
++ 	caddr_t addr; 
++ 	int flag;
++ 	struct proc *p;
++ {
++ 	DPRINTFN(5, ("uscannerioctl: cmd=%08lx\n", cmd));
++ 	if (sc->sc_dying)
++ 		return (EIO);
++ 
++ 	if (endpt != USB_CONTROL_ENDPOINT)
++ 		return (EINVAL);
++ 
++ 	switch (cmd) {
++ #ifdef USCANNER_DEBUG
++ 	case USB_SETDEBUG:
++ 		uscannerdebug = *(int *)addr;
++ 		break;
++ #endif
++ 	case USB_DO_REQUEST:
++ 	{
++ 		struct usb_ctl_request *ur = (void *)addr;
++ 		int len = UGETW(ur->ucr_request.wLength);
++ 		struct iovec iov;
++ 		struct uio uio;
++ 		void *ptr = 0;
++ 		usbd_status err;
++ 		int error = 0;
++ 	DPRINTFN(5, ("bmRequestType = %02x, bRequest = %02x, wValue[0] = %02x, "
++ 		     "wValue[1] = %02x, wIndex[0] = %02x, wIndex[1] = %02x, "
++ 		     "wLength[0] = %02x, wLength[1] = %02x \n",
++ 		     ur->ucr_request.bmRequestType,
++ 		     ur->ucr_request.bRequest,
++ 		     ur->ucr_request.wValue[0],ur->ucr_request.wValue[1],
++ 		     ur->ucr_request.wIndex[0],ur->ucr_request.wIndex[1],
++ 		     ur->ucr_request.wLength[0],ur->ucr_request.wLength[1]));
++ 	if (ur->ucr_request.bmRequestType == 0x40)
++ 	  {
++ 	    int i;
++ 	    unsigned char *p = (unsigned char *)ur->ucr_data;
++ 	    DPRINTFN(5, ("dump data(len = %x)\n", len));
++ 	    for (i = 0; i < len; i++)
++ 	      {
++ 		DPRINTFN(5, ("[%d]: %02x ", i, *(p+i)));
++ 	      }
++ 	    DPRINTFN(5, ("\n"));
++ 	  }
++ 		if (!(flag & FWRITE))
++ 			return (EPERM);
++ 		/* Avoid requests that would damage the bus integrity. */
++ 		if ((ur->ucr_request.bmRequestType == UT_WRITE_DEVICE &&
++ 		     ur->ucr_request.bRequest == UR_SET_ADDRESS) ||
++ 		    (ur->ucr_request.bmRequestType == UT_WRITE_DEVICE &&
++ 		     ur->ucr_request.bRequest == UR_SET_CONFIG) ||
++ 		    (ur->ucr_request.bmRequestType == UT_WRITE_INTERFACE &&
++ 		     ur->ucr_request.bRequest == UR_SET_INTERFACE))
++ 			return (EINVAL);
++ 
++ 		if (len < 0 || len > 32767)
++ 			return (EINVAL);
++ 		if (len != 0) {
++ 			iov.iov_base = (caddr_t)ur->ucr_data;
++ 			iov.iov_len = len;
++ 			uio.uio_iov = &iov;
++ 			uio.uio_iovcnt = 1;
++ 			uio.uio_resid = len;
++ 			uio.uio_offset = 0;
++ 			uio.uio_segflg = UIO_USERSPACE;
++ 			uio.uio_rw =
++ 				ur->ucr_request.bmRequestType & UT_READ ? 
++ 				UIO_READ : UIO_WRITE;
++ 			uio.uio_procp = p;
++ 			ptr = malloc(len, M_TEMP, M_WAITOK);
++ 			if (uio.uio_rw == UIO_WRITE) {
++ 				error = uiomove(ptr, len, &uio);
++ 				if (error)
++ 					goto ret;
++ 			}
++ 		}
++ 		err = usbd_do_request_flags(sc->sc_udev, &ur->ucr_request, 
++ 			  ptr, ur->ucr_flags, &ur->ucr_actlen);
++ 		if (err) {
++ 			error = EIO;
++ 			goto ret;
++ 		}
++ 		if (len != 0) {
++ 			if (uio.uio_rw == UIO_READ) {
++ 				error = uiomove(ptr, len, &uio);
++ 				if (error)
++ 					goto ret;
++ 			}
++ 		}
++ 	ret:
++ 		if (ptr)
++ 			free(ptr, M_TEMP);
++ 		return (error);
++ 	}
++ 	case USB_GET_DEVICEINFO:
++ 		usbd_fill_deviceinfo(sc->sc_udev,
++ 		    (struct usb_device_info *)addr);
++ 		break;
++ 	default:
++ 		return (EINVAL);
++ 	}
++ 	return (0);
++ }
++ 
+  int
+  uscannerioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
+  {
+! 	int endpt = USCANNERENDPOINT(dev);
+! 	struct uscanner_softc *sc;
+! 	int error;
+! 
+! 	USB_GET_SC(uscanner, USCANNERUNIT(dev), sc);
+! 
+! 	sc->sc_refcnt++;
+! 	error = uscanner_do_ioctl(sc, endpt, cmd, addr, flag, p);
+! 	if (--sc->sc_refcnt < 0)
+! 		usb_detach_wakeup(USBDEV(sc->sc_dev));
+! 	return (error);
+  }
+  
+  #if defined(__FreeBSD__)
